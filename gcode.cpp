@@ -198,6 +198,12 @@ void GCode::sendGcode(QString line)
 // keep polling our position and state until we are done running
 void GCode::pollPosWaitForIdle(bool checkMeasurementUnits)
 {
+    diag ("pollPosWaitForIdle checkMeasurementUnits=%d", checkMeasurementUnits);
+
+    bool ret = sendGcodeLocal(REQUEST_PARSER_STATE_V08c);
+    if (!ret)
+        return;
+
     if (controlParams.usePositionRequest
             && (controlParams.positionRequestType == PREQ_ALWAYS_NO_IDLE_CHK
                     || controlParams.positionRequestType == PREQ_ALWAYS
@@ -382,7 +388,7 @@ bool GCode::sendGcodeInternal(QString line, QString& result, bool recordResponse
     {
         emit addListOut("(CTRL-X)");
     }
-    else if (!sentReqForLocation)// if requesting location, don't add that "noise" to the output view
+    else if (!sentReqForLocation && !sentReqForParserState) // if requesting location or status don't add that "noise" to the output view
     {
         emit addListOut(line);
     }
@@ -493,6 +499,9 @@ bool GCode::waitForOk(QString& result, int waitSec, bool sentReqForLocation, boo
 {
     int okcount = 0;
 
+    diag ("waitForOk(waitSec=%d sentReqForLocation=%d sentReqForParserState=%d aggressive=%d finalize=%d\n",
+           waitSec, sentReqForLocation, sentReqForParserState, aggressive, finalize);
+
     if (aggressive)
     {
         //if (!port.bytesAvailable()) //more conservative code
@@ -535,6 +544,8 @@ bool GCode::waitForOk(QString& result, int waitSec, bool sentReqForLocation, boo
                 return false;
 
             count++;
+            if (count > waitCount) break;
+
             SLEEP(100);
         }
         else if (n < 0)
@@ -601,6 +612,7 @@ bool GCode::waitForOk(QString& result, int waitSec, bool sentReqForLocation, boo
                 {
                     diag(qPrintable(tr("GOT: '%s' (aggressive)\n")), tmpTrim.trimmed().toLocal8Bit().constData());
                     parseCoordinates(received, aggressive);
+                    parseGrblState(received);
                 }
 
                 int total = 0;
@@ -637,45 +649,18 @@ bool GCode::waitForOk(QString& result, int waitSec, bool sentReqForLocation, boo
             }
             else
             {
-                diag(qPrintable(tr("GOT:%s\n")), tmpTrim.toLocal8Bit().constData());
+                diag(qPrintable(tr("GOT: '%s' (bottom)\n")), tmpTrim.toLocal8Bit().constData());
             }
 
             if (!received.contains(RESPONSE_OK) && !received.contains(RESPONSE_ERROR))
             {
-                if (sentReqForParserState)
-                {
-                    const QRegExp rx("\\[([\\s\\w\\.\\d]+)\\]");
-
-                    if (rx.indexIn(received, 0) != -1 && rx.captureCount() == 1)
-                    {
-                        QStringList list = rx.capturedTexts();
-                        if (list.size() == 2)
-                        {
-                            QStringList items = list.at(1).split(" ");
-                            if (items.contains("G20"))// inches
-                            {
-                                if (controlParams.useMm)
-                                    incorrectMeasurementUnits = true;
-                                else
-                                    incorrectMeasurementUnits = false;
-                            }
-                            else if (items.contains("G21"))// millimeters
-                            {
-                                if (controlParams.useMm)
-                                    incorrectMeasurementUnits = false;
-                                else
-                                    incorrectMeasurementUnits = true;
-                            }
-                            else
-                            {
-                                // not in list!
-                                incorrectMeasurementUnits = true;
-                            }
-                        }
-                    }
+                if (sentReqForParserState) {
+                    diag("bottom of waitForOk parseGrblState");
+                    parseGrblState(received);
                 }
-                else
-                {
+
+                if (sentReqForLocation) {
+                    diag("bottom of waitForOk parseCoordinates");
                     parseCoordinates(received, aggressive);
                 }
             }
@@ -721,7 +706,8 @@ bool GCode::waitForOk(QString& result, int waitSec, bool sentReqForLocation, boo
     QStringList listToSend;
     for (int i = 0; i < list.size(); i++)
     {
-        if (list.at(i).length() > 0 && list.at(i) != RESPONSE_OK && !sentReqForLocation && !list.at(i).startsWith("MPos:["))
+        if (list.at(i).length() > 0 && list.at(i) != RESPONSE_OK && !sentReqForLocation && !list.at(i).startsWith("MPos:[") &&
+                !sentReqForParserState && !list.at(i).startsWith("[") && !list.at(i).startsWith("<"))
             listToSend.append(list.at(i));
     }
 
@@ -849,6 +835,109 @@ bool GCode::waitForStartupBanner(QString& result, int waitSec, bool failOnNoFoun
     return status;
 }
 
+void GCode::parseGcodeState(const QString &str, bool defaults)
+{
+    bool matched = false;
+    QStringList items = str.split(" ");
+
+    // Units
+    if (items.contains("G20")) // inches
+    {
+        grblState.mm = false;
+        grblState.in = true;
+        matched = true;
+    }
+    else if (items.contains("G21")) // millimeters
+    {
+        grblState.mm = true;
+        grblState.in = false;
+        matched = true;
+    }
+    else if (defaults)
+    {
+        grblState.mm = false;
+        grblState.in = false;
+        matched = true;
+    }
+
+    // Absolute/relative
+    if (items.contains("G90")) // absolute
+    {
+        grblState.absolute = true;
+        matched = true;
+    }
+    else if (items.contains("G91")) // relative
+    {
+        grblState.absolute = false;
+        matched = true;
+    }
+
+    // Spindle
+    if (items.contains("M5")) // spindle off
+    {
+        grblState.spindle = false;
+        matched = true;
+    }
+    else if(items.contains("M3")) // spindle on, clockwise
+    {
+        grblState.spindle = true;
+        grblState.direction = false;
+        matched = true;
+    }
+    else if (items.contains("M4")) // spindle on, counter-clockwise
+    {
+        grblState.spindle = true;
+        grblState.direction = true;
+        matched = true;
+    }
+
+    // Coolant
+    if (items.contains("M7") || items.contains("M8")) // coolant on
+    {
+        grblState.coolant = true;
+        matched = true;
+    }
+    else if (items.contains("M9")) // coolant off
+    {
+        grblState.coolant = false;
+        matched = true;
+    }
+
+    // Now look for items we need to parse
+    foreach (const QString &item, items) {
+        if (item.startsWith("T")) {
+            grblState.toolNumber = item.mid(1).toInt();
+            matched = true;
+        } else if (item.startsWith("F")) {
+            grblState.feedRate = (int)item.mid(1).toFloat();
+            matched = true;
+        }
+    }
+
+    if (matched)
+    {
+        emit updateGrblState(grblState);
+    }
+}
+
+void GCode::parseGrblState(const QString& received)
+{
+    const QRegExp rx("\\[([\\s\\w\\.\\d]+)\\]");
+
+    if (rx.indexIn(received, 0) != -1 && rx.captureCount() == 1)
+    {
+        QStringList list = rx.capturedTexts();
+        if (list.size() == 2)
+        {
+            parseGcodeState(list.at(1), true);
+
+            incorrectMeasurementUnits = ((grblState.mm != controlParams.useMm) ||
+                                         (grblState.in == controlParams.useMm));
+        }
+
+    }
+}
+
 void GCode::parseCoordinates(const QString& received, bool aggressive)
 {
     if (aggressive)
@@ -877,8 +966,9 @@ void GCode::parseCoordinates(const QString& received, bool aggressive)
 	QRegExp rxWPos;
 	/// 3 axis
 	QString format("(-*\\d+\\.\\d+),(-*\\d+\\.\\d+)") ;
-    int maxaxis = MAX_AXIS_COUNT, naxis ;
-    for (naxis = DEFAULT_AXIS_COUNT; naxis <= maxaxis; naxis++) {
+    int maxaxis = MAX_AXIS_COUNT, naxis;
+    for (naxis = DEFAULT_AXIS_COUNT; naxis <= maxaxis; naxis++)
+    {
 		if (!doubleDollarFormat)
 			captureCount = naxis ;
 		else
@@ -897,7 +987,8 @@ void GCode::parseCoordinates(const QString& received, bool aggressive)
 		if (good)
 			break;
 	}
-	if (good) {  /// naxis contains number axis
+    if (good)
+    {  /// naxis contains number axis
         if (numaxis <= DEFAULT_AXIS_COUNT)
         {
             if (naxis > DEFAULT_AXIS_COUNT)
@@ -1723,15 +1814,28 @@ void GCode::gotoXYZFourth(QString line)
         QStringList list = line.split(QRegExp("[\\s]+"));
         for (int i = 0; i < list.size(); i++)
         {
-            QString item = getMoveAmountFromString("X", list.at(i));
-            moveDetected = item.length() > 0;
+            QString item;
 
+            if (!moveDetected)
+	    {
+                item = getMoveAmountFromString("X", list.at(i));
+            moveDetected = item.length() > 0;
+            }
+
+            if (!moveDetected)
+	    {
             item = getMoveAmountFromString("Y", list.at(i));
             moveDetected = item.length() > 0;
+            }
 
+            if (!moveDetected)
+	    {
             item = getMoveAmountFromString("Z", list.at(i));
             moveDetected = item.length() > 0 ;
-            if (numaxis == MAX_AXIS_COUNT)  {
+            }
+
+            if (!moveDetected && numaxis == MAX_AXIS_COUNT)
+	    {
                 item = getMoveAmountFromString(QString(controlParams.fourthAxisType), list.at(i));
 				moveDetected = item.length() > 0;
 			}
@@ -1802,8 +1906,10 @@ bool GCode::SendJog(QString cmd, bool absoluteAfterAxisAdj)
         pollPosWaitForIdle(false);
     }
 
-    if (absoluteAfterAxisAdj)
+    if (absoluteAfterAxisAdj) {
         sendGcodeLocal("G90\r");
+        pollPosWaitForIdle(false);
+    }
 
     return result;
 }
@@ -1938,6 +2044,7 @@ GCode::PosReqStatus GCode::positionUpdate(bool forceIfEnabled /* = false */)
     {
         if (forceIfEnabled)
         {
+            sendGcodeLocal(REQUEST_PARSER_STATE_V08c, false);
             return sendGcodeLocal(REQUEST_CURRENT_POS) ? POS_REQ_RESULT_OK : POS_REQ_RESULT_ERROR;
         }
         else
@@ -1946,6 +2053,7 @@ GCode::PosReqStatus GCode::positionUpdate(bool forceIfEnabled /* = false */)
             if (ms >= controlParams.postionRequestTimeMilliSec)
             {
                 pollPosTimer.restart();
+                sendGcodeLocal(REQUEST_PARSER_STATE_V08c, false);
                 return sendGcodeLocal(REQUEST_CURRENT_POS) ? POS_REQ_RESULT_OK : POS_REQ_RESULT_ERROR;
             }
             else

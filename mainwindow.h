@@ -28,6 +28,7 @@
 #include "positem.h"
 #include "gcode.h"
 #include "renderarea.h"
+#include "grblstate.h"
 
 #define COMPANY_NAME "zapmaker"
 #define APPLICATION_NAME "GrblController"
@@ -124,6 +125,7 @@ private slots:
     void incX();
     void incY();
     void incZ();
+    void stepChange();
     void setHome();
         //manual
     void gotoXYZFourth();
@@ -156,6 +158,8 @@ private slots:
     void grblReset();
     void grblUnlock();
     void updateCoordinates(Coord3D machineCoord, Coord3D workCoord);
+    void resetGrblState();
+    void updateGrblState(GrblState grblState);
     void goHomeSafe();
     void zJogSliderDisplay(int pos);
     void zJogSliderPressed();

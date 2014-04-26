@@ -38,6 +38,7 @@ MainWindow::MainWindow(QWidget *parent) :
     qRegisterMetaType<Coord3D>("Coord3D");
     qRegisterMetaType<PosItem>("PosItem");
     qRegisterMetaType<ControlParams>("ControlParams");
+    qRegisterMetaType<GrblState>("GrblState");
 
 
     ui->setupUi(this);
@@ -86,6 +87,7 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(ui->IncZBtn,SIGNAL(clicked()),this,SLOT(incZ()));
     connect(ui->DecFourthBtn,SIGNAL(clicked()),this,SLOT(decFourth()));
     connect(ui->IncFourthBtn,SIGNAL(clicked()),this,SLOT(incFourth()));
+    connect(ui->comboStep,SIGNAL(currentIndexChanged(int)),this,SLOT(stepChange()));
     connect(ui->btnSetHome,SIGNAL(clicked()),this,SLOT(setHome()));
     connect(ui->comboCommand->lineEdit(),SIGNAL(editingFinished()),this,SLOT(gotoXYZFourth()));
     connect(ui->Begin,SIGNAL(clicked()),this,SLOT(begin()));
@@ -136,6 +138,7 @@ MainWindow::MainWindow(QWidget *parent) :
     connect(&gcode, SIGNAL(resetTimer(bool)), &runtimeTimer, SLOT(resetTimer(bool)));
     connect(&gcode, SIGNAL(enableGrblDialogButton()), this, SLOT(enableGrblDialogButton()));
     connect(&gcode, SIGNAL(updateCoordinates(Coord3D,Coord3D)), this, SLOT(updateCoordinates(Coord3D,Coord3D)));
+    connect(&gcode, SIGNAL(updateGrblState(GrblState)), this, SLOT(updateGrblState(GrblState)));
     connect(&gcode, SIGNAL(setLastState(QString)), ui->outputLastState, SLOT(setText(QString)));
     connect(&gcode, SIGNAL(setUnitsWork(QString)), ui->outputUnitsWork, SLOT(setText(QString)));
     connect(&gcode, SIGNAL(setUnitsMachine(QString)), ui->outputUnitsMachine, SLOT(setText(QString)));
@@ -229,6 +232,7 @@ MainWindow::MainWindow(QWidget *parent) :
         ui->DecFourthBtn->setEnabled(false);
         ui->lblFourthJog->setEnabled(false);
     }
+    ui->grblStatus->setEnabled(false);
     ui->groupBoxSendFile->setEnabled(true);
     ui->comboCommand->setEnabled(false);
     ui->labelCommand->setEnabled(false);
@@ -329,6 +333,7 @@ void MainWindow::begin()
     if(ret!=QMessageBox::Cancel)
     {
         ui->tabAxisVisualizer->setEnabled(false);
+        ui->grblStatus->setEnabled(false);
         ui->comboCommand->setEnabled(false);
         ui->labelCommand->setEnabled(false);
         ui->Begin->setEnabled(false);
@@ -385,6 +390,7 @@ void MainWindow::goHomeSafe()
 void MainWindow::stopSending()
 {
     ui->tabAxisVisualizer->setEnabled(true);
+    ui->grblStatus->setEnabled(true);
     ui->lcdWorkNumberFourth->setEnabled(controlParams.useFourAxis);
     ui->lcdMachNumberFourth->setEnabled(controlParams.useFourAxis);
     ui->IncFourthBtn->setEnabled(controlParams.useFourAxis);
@@ -474,6 +480,7 @@ void MainWindow::openPortCtl(bool reopen)
         ui->openFile->setEnabled(false);
 
         ui->tabAxisVisualizer->setEnabled(false);
+        ui->grblStatus->setEnabled(false);
         ui->groupBoxSendFile->setEnabled(false);
         ui->comboCommand->setEnabled(false);
         ui->labelCommand->setEnabled(false);
@@ -495,6 +502,7 @@ void MainWindow::portIsClosed(bool reopen)
     SLEEP(100);
 
     ui->tabAxisVisualizer->setEnabled(false);
+    ui->grblStatus->setEnabled(false);
     ui->groupBoxSendFile->setEnabled(false);
     ui->comboCommand->setEnabled(false);
     ui->labelCommand->setEnabled(false);
@@ -509,6 +517,7 @@ void MainWindow::portIsClosed(bool reopen)
     ui->btnUnlockGrbl->setEnabled(false);
     ui->btnGoHomeSafe->setEnabled(false);
     ui->pushButtonRefreshPos->setEnabled(false);
+    resetGrblState();
 
     if (reopen)
     {
@@ -528,6 +537,7 @@ void MainWindow::portIsOpen(bool sendCode)
 void MainWindow::adjustedAxis()
 {
     ui->tabAxisVisualizer->setEnabled(true);
+    ui->grblStatus->setEnabled(true);
     ui->comboCommand->setEnabled(true);
     ui->labelCommand->setEnabled(true);
 
@@ -583,6 +593,7 @@ void MainWindow::enableGrblDialogButton()
     ui->cmbPort->setEnabled(false);
     ui->comboBoxBaudRate->setEnabled(false);
     ui->tabAxisVisualizer->setEnabled(true);
+    ui->grblStatus->setEnabled(true);
     ui->lcdWorkNumberFourth->setEnabled(controlParams.useFourAxis);
     ui->lcdMachNumberFourth->setEnabled(controlParams.useFourAxis);
     ui->IncFourthBtn->setEnabled(controlParams.useFourAxis);
@@ -681,6 +692,7 @@ void MainWindow::decFourth()
 		disableAllButtons();
 		emit axisAdj(controlParams.fourthAxisType, -jogStep, invFourth, absoluteAfterAxisAdj, 0);	
 }
+
 void MainWindow::incFourth()
 {
 /// LETARTARE 25-04-2014
@@ -704,6 +716,11 @@ void MainWindow::incFourth()
 		emit axisAdj(controlParams.fourthAxisType, jogStep, invFourth, absoluteAfterAxisAdj, 0);
 }
 
+void MainWindow::stepChange()
+{
+    jogStep = ui->comboStep->currentText().toFloat();
+}
+
 void MainWindow::getOptions()
 {
     Options opt(this);
@@ -715,7 +732,9 @@ void MainWindow::gotoXYZFourth()
     if (ui->comboCommand->lineEdit()->text().length() == 0)
         return;
 
-    QString line = ui->comboCommand->lineEdit()->text().append("\r");
+    // we used to append \r here - it's unnecessary and stops
+    // sendGcodeInternal from recognizing some Grbl commands
+    QString line = ui->comboCommand->lineEdit()->text();
 
     emit gotoXYZFourth(line);
 }
@@ -1372,6 +1391,78 @@ void MainWindow::updateCoordinates(Coord3D machineCoord, Coord3D workCoord)
     }
 */
     refreshLcd();
+}
+
+void MainWindow::resetGrblState()
+{
+    ui->grblStatus_spindle->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    ui->grblStatus_spindle->setText("NO SPIN");
+    ui->grblStatus_abs->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    ui->grblStatus_rel->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    ui->grblStatus_mm->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    ui->grblStatus_in->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    ui->grblStatus_coolant->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    ui->grblStatus_tool->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    ui->grblStatus_tool->setText("NO TOOL");
+    ui->grblStatus_feed->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    ui->grblStatus_feed->setText("NO FEED");
+}
+
+void MainWindow::updateGrblState(GrblState grblState)
+{
+    if (grblState.spindle) {
+        ui->grblStatus_spindle->setStyleSheet(GRBL_STATE_STYLE_ON);
+        if(grblState.direction) {
+            ui->grblStatus_spindle->setText("CCW");
+        } else {
+            ui->grblStatus_spindle->setText("CW");
+        }
+    } else {
+        ui->grblStatus_spindle->setStyleSheet(GRBL_STATE_STYLE_OFF);
+        ui->grblStatus_spindle->setText("NO SPIN");
+    }
+
+    if (grblState.absolute) {
+        ui->grblStatus_abs->setStyleSheet(GRBL_STATE_STYLE_ON);
+        ui->grblStatus_rel->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    } else {
+        ui->grblStatus_abs->setStyleSheet(GRBL_STATE_STYLE_OFF);
+        ui->grblStatus_rel->setStyleSheet(GRBL_STATE_STYLE_ON);
+    }
+
+    if(grblState.mm) {
+        ui->grblStatus_mm->setStyleSheet(GRBL_STATE_STYLE_ON);
+    } else {
+        ui->grblStatus_mm->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    }
+
+    if(grblState.in) {
+        ui->grblStatus_in->setStyleSheet(GRBL_STATE_STYLE_ON);
+    } else {
+        ui->grblStatus_in->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    }
+
+    if (grblState.coolant) {
+        ui->grblStatus_coolant->setStyleSheet(GRBL_STATE_STYLE_ON);
+    } else {
+        ui->grblStatus_coolant->setStyleSheet(GRBL_STATE_STYLE_OFF);
+    }
+
+    if (grblState.toolNumber == -1) {
+        ui->grblStatus_tool->setStyleSheet(GRBL_STATE_STYLE_OFF);
+        ui->grblStatus_tool->setText("NO TOOL");
+    } else {
+        ui->grblStatus_tool->setStyleSheet(GRBL_STATE_STYLE_ON);
+        ui->grblStatus_tool->setText(QString("T%1").arg(grblState.toolNumber));
+    }
+
+    if (grblState.feedRate == -1) {
+        ui->grblStatus_feed->setStyleSheet(GRBL_STATE_STYLE_OFF);
+        ui->grblStatus_feed->setText("NO FEED");
+    } else {
+        ui->grblStatus_feed->setStyleSheet(GRBL_STATE_STYLE_ON);
+        ui->grblStatus_feed->setText(QString("F%1").arg(grblState.feedRate));
+    }
 }
 
 void MainWindow::refreshLcd()

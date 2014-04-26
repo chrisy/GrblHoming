@@ -20,6 +20,7 @@
 #include "rs232.h"
 #include "coord3d.h"
 #include "controlparams.h"
+#include "grblstate.h"
 
 #define BUF_SIZE 300
 
@@ -100,6 +101,7 @@ signals:
     void setVisCurrLine(int currLine);
     void setLcdState(bool valid);
     void setVisualLivenessCurrPos(bool isLiveCP);
+    void updateGrblState(GrblState grblState);
 
 public slots:
     void openPort(QString commPortStr, QString baudRate);
@@ -138,6 +140,8 @@ private:
     bool isPortOpen();
     QString getMoveAmountFromString(QString prefix, QString item);
     bool SendJog(QString strline, bool absoluteAfterAxisAdj);
+    void parseGcodeState(const QString &str, bool defaults=false);
+    void parseGrblState(const QString& received);
     void parseCoordinates(const QString& received, bool aggressive);
     void pollPosWaitForIdle(bool checkMeasurementUnits);
     void checkAndSetCorrectMeasurementUnits();
@@ -177,6 +181,7 @@ private:
     QStringList grblFilteredCmds;
     QTime pollPosTimer;
     bool positionValid;
+    GrblState grblState;
 
     int sentI;
     int rcvdI;

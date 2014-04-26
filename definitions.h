@@ -57,6 +57,9 @@
 #define DEFAULT_POS_REQ_FREQ_SEC    1.0
 #define DEFAULT_POS_REQ_FREQ_MSEC   1000
 
+#define GRBL_STATE_STYLE_ON  "QFrame { border: 0px solid gray; border-radius: 5px; background-color: #dfb320; color: #fff;}"
+#define GRBL_STATE_STYLE_OFF "QFrame { border: 0px solid gray; border-radius: 5px; background-color: #660; color: #888;}"
+
 extern AtomicIntBool g_enableDebugLog;
 
 void status(const char *str, ...);
