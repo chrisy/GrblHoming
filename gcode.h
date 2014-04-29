@@ -17,7 +17,7 @@
 #include <QThread>
 #include <QTextStream>
 #include "definitions.h"
-#include "rs232.h"
+#include "baseport.h"
 #include "coord3d.h"
 #include "controlparams.h"
 
@@ -154,7 +154,7 @@ private:
     void setLivenessState(bool valid);
 
 private:
-    RS232 port;
+    BasePort *port;
     AtomicIntBool abortState;
     AtomicIntBool resetState;
     AtomicIntBool shutdownState;

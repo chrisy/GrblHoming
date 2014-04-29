@@ -57,6 +57,8 @@
 #define DEFAULT_POS_REQ_FREQ_SEC    1.0
 #define DEFAULT_POS_REQ_FREQ_MSEC   1000
 
+#define DEFAULT_TCP_PORT 4000
+
 extern AtomicIntBool g_enableDebugLog;
 
 void status(const char *str, ...);

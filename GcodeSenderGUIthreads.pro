@@ -5,7 +5,7 @@
 # (fourth axis modifications and translation added by LETARTARE 2013-08-03)
 #-------------------------------------------------
 
-QT       += core gui widgets
+QT       += core gui widgets network
 
 TARGET = GrblController
 TEMPLATE = app
@@ -31,7 +31,9 @@ SOURCES += main.cpp\
     itemtobase.cpp \
     arcitem.cpp \
     pointitem.cpp \
-    controlparams.cpp
+    controlparams.cpp \
+    tcpport.cpp \
+    baseport.cpp
 
 HEADERS  += mainwindow.h \
     rs232.h \
@@ -54,7 +56,10 @@ HEADERS  += mainwindow.h \
     pointitem.h \
     termiosext.h \
     controlparams.h \
-    version.h
+    version.h \
+    baseport.h \
+    tcpport.h \
+    sleep.h
 
 FORMS    += mainwindow.ui \
     options.ui \
@@ -98,7 +103,9 @@ OTHER_FILES += \
     android/src/org/kde/necessitas/ministro/IMinistroCallback.aidl \
     android/src/org/kde/necessitas/origo/QtActivity.java \
     android/src/org/kde/necessitas/origo/QtApplication.java \
-    android/version.xml
+    android/version.xml \
+    trlocale/GrblController_fr.ts \
+    trlocale/GrblController_xx.ts
 
 # Translations
 	TRANSLATIONS += trlocale/GrblController_xx.ts

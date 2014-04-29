@@ -28,7 +28,6 @@
 #if QT_VERSION < QT_VERSION_CHECK(5, 0, 0)
 #include <Windows.h>
 #else
-// TODO - R - if I leave out Windows.h then Sleep is not found???
 #include <Windows.h>
 #include <QtGui/QWindow>
 #endif
@@ -37,20 +36,16 @@
 #include <qextserialport.h>
 #include <qextserialenumerator.h>
 
+#include "baseport.h"
 #include "definitions.h"
 
-
-#if defined(Q_OS_LINUX) || defined(Q_OS_MACX) || defined(Q_OS_ANDROID)
-#define SLEEP(x) usleep(1000 * x);
-#else
-#define SLEEP(x) Sleep(x);
-#endif
-
-
-class RS232
+class RS232 : public BasePort
 {
 public:
     RS232();
+    virtual ~RS232();
+
+public:
     //methods
     bool OpenComport(QString commPortStr, QString baudRate);
     int PollComport(char *buf, int size);

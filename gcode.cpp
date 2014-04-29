@@ -7,17 +7,19 @@
  * Software is provided AS-IS
  ****************************************************************/
 
-#include "gcode.h"
-
 #include <QObject>
+#include <QCoreApplication>
+#include "gcode.h"
+#include "sleep.h"
 
 GCode::GCode()
-    : errorCount(0), doubleDollarFormat(false),
+    : port(NULL), errorCount(0), doubleDollarFormat(false),
       incorrectMeasurementUnits(false), incorrectLcdDisplayUnits(false),
       maxZ(0), motionOccurred(false),
       sliderZCount(0),
       positionValid(false),
       numaxis(DEFAULT_AXIS_COUNT)
+
 {
     // use base class's timer - use it to capture random text from the controller
     startTimer(1000);
@@ -33,16 +35,23 @@ void GCode::openPort(QString commPortStr, QString baudRate)
 
     currComPort = commPortStr;
 
-    port.setCharSendDelayMs(controlParams.charSendDelayMs);
+    // Make it the right kind of port!
+    if (port != NULL) {
+        port->CloseComport();
+        delete port;
+    }
+    port = BasePortFactory::CreateFromURL(commPortStr);
 
-    if (port.OpenComport(commPortStr, baudRate))
+    port->setCharSendDelayMs(controlParams.charSendDelayMs);
+
+    if (port->OpenComport(commPortStr, baudRate))
     {
         emit portIsOpen(true);
     }
     else
     {
         emit portIsClosed(false);
-        QString msg = tr("Can't open COM port ") + commPortStr;
+        QString msg = tr("Can't open port ") + commPortStr;
         sendMsg(msg);
         addList(msg);
         warn("%s", qPrintable(msg));
@@ -53,19 +62,20 @@ void GCode::openPort(QString commPortStr, QString baudRate)
 #if defined(Q_OS_LINUX)
         addList("-Is current user in sudoers group?");
 #endif
-        //QMessageBox(QMessageBox::Critical,"Error","Could not open port.",QMessageBox::Ok).exec();
     }
 }
 
 void GCode::closePort(bool reopen)
 {
-    port.CloseComport();
+    if (port == NULL) return;
+    port->CloseComport();
     emit portIsClosed(reopen);
 }
 
 bool GCode::isPortOpen()
 {
-    return port.isPortOpen();
+    if (port == NULL) return false;
+    return port->isPortOpen();
 }
 
 // Abort means stop file send after the end of this line
@@ -150,6 +160,8 @@ void GCode::sendGcode(QString line)
 {
     bool checkMeasurementUnits = false;
 
+    if (port == NULL) return;
+
     // empty line means we have just opened the com port
     if (line.length() == 0)
     {
@@ -170,7 +182,7 @@ void GCode::sendGcode(QString line)
             buf[0] = CTRL_X;
 
 			diag(qPrintable(tr("SENDING: 0x%02X (CTRL-X) to check presence of Grbl\n")), buf[0])  ;
-            if (!port.SendBuf(buf, 1))
+            if (!port->SendBuf(buf, 1))
             {
                 QString msg = tr("Sending to port failed");
 				err("%s", qPrintable(msg));
@@ -277,6 +289,8 @@ bool GCode::sendGcodeLocal(QString line, bool recordResponseOnFail /* = false */
     sendMsg("");
     resetState.set(false);
 
+    if (port == NULL) return false;
+
     bool ret = sendGcodeInternal(line, result, recordResponseOnFail, waitSec, aggressive, currLine);
     if (shutdownState.get())
         return false;
@@ -289,7 +303,7 @@ bool GCode::sendGcodeLocal(QString line, bool recordResponseOnFail /* = false */
         if (!ret && resetState.get())
         {
             resetState.set(false);
-            port.Reset();
+            port->Reset();
         }
     }
     else
@@ -343,7 +357,7 @@ bool GCode::checkGrbl(const QString& result)
 // Wrapped method. Should only be called from above method.
 bool GCode::sendGcodeInternal(QString line, QString& result, bool recordResponseOnFail, int waitSec, bool aggressive, int currLine /* = 0 */)
 {
-    if (!port.isPortOpen())
+    if (port == NULL || !port->isPortOpen())
     {
         QString msg = tr("Port not available yet")  ;
         err("%s", msg.toLocal8Bit().constData());
@@ -426,9 +440,9 @@ bool GCode::sendGcodeInternal(QString line, QString& result, bool recordResponse
             return false;
     }
 
-    if (!port.SendBuf(buf, line.length()))
+    if (!port->SendBuf(buf, line.length()))
     {
-        QString msg = tr("Sending to port failed")  ;
+        QString msg = tr("Sending to port failed");
         err("%s", qPrintable(msg));
         emit addList(msg);
         emit sendMsg(msg);
@@ -496,7 +510,7 @@ bool GCode::waitForOk(QString& result, int waitSec, bool sentReqForLocation, boo
     if (aggressive)
     {
         //if (!port.bytesAvailable()) //more conservative code
-        if (!finalize || !port.bytesAvailable())
+        if (!finalize || !port->bytesAvailable())
         {
             int total = 0;
             bool haveWait = false;
@@ -528,7 +542,7 @@ bool GCode::waitForOk(QString& result, int waitSec, bool sentReqForLocation, boo
     result.clear();
     while (!result.contains(RESPONSE_OK) && !result.contains(RESPONSE_ERROR) && !resetState.get())
     {
-        int n = port.PollComportLine(tmp, BUF_SIZE);
+        int n = port->PollComportLine(tmp, BUF_SIZE);
         if (n == 0)
         {
             if (aggressive && sendCount.size() == 0)
@@ -536,10 +550,11 @@ bool GCode::waitForOk(QString& result, int waitSec, bool sentReqForLocation, boo
 
             count++;
             SLEEP(100);
+            QCoreApplication::processEvents();
         }
         else if (n < 0)
         {
-			QString Mes(tr("Error reading data from COM port\n"))  ;
+            QString Mes(tr("Error reading data from port\n"))  ;
             err(qPrintable(Mes));
 
             if (aggressive && sendCount.size() == 0)
@@ -551,9 +566,9 @@ bool GCode::waitForOk(QString& result, int waitSec, bool sentReqForLocation, boo
             result.append(tmp);
 
             QString tmpTrim(tmp);
-            int pos = tmpTrim.indexOf(port.getDetectedLineFeed());
+            int pos = tmpTrim.indexOf(port->getDetectedLineFeed());
             if (pos != -1)
-                tmpTrim.remove(pos, port.getDetectedLineFeed().size());
+                tmpTrim.remove(pos, port->getDetectedLineFeed().size());
             QString received(tmp);
 
             if (aggressive)
@@ -618,7 +633,7 @@ bool GCode::waitForOk(QString& result, int waitSec, bool sentReqForLocation, boo
                     result.clear();
                     continue;
                 }
-                else if (port.bytesAvailable())
+                else if (port->bytesAvailable())
                 {
                     // comment out this block for more conservative approach
                     if (!finalize && okcount > 0)
@@ -717,7 +732,7 @@ bool GCode::waitForOk(QString& result, int waitSec, bool sentReqForLocation, boo
         //status = false;
     }
 
-    QStringList list = QString(result).split(port.getDetectedLineFeed());
+    QStringList list = QString(result).split(port->getDetectedLineFeed());
     QStringList listToSend;
     for (int i = 0; i < list.size(); i++)
     {
@@ -742,18 +757,22 @@ bool GCode::waitForStartupBanner(QString& result, int waitSec, bool failOnNoFoun
     int count = 0;
     int waitCount = waitSec * 10;// multiplier depends on sleep values below
     bool status = true;
+
+    if (port == NULL) return false;
+
     result.clear();
     while (!resetState.get())
     {
-        int n = port.PollComportLine(tmp, BUF_SIZE);
+        int n = port->PollComportLine(tmp, BUF_SIZE);
         if (n == 0)
         {
             count++;
             SLEEP(100);
+            QCoreApplication::processEvents();
         }
         else if (n < 0)
         {
-            err(qPrintable(tr("Error reading data from COM port\n")) );
+            err(qPrintable(tr("Error reading data from port\n")) );
         }
         else
         {
@@ -761,9 +780,9 @@ bool GCode::waitForStartupBanner(QString& result, int waitSec, bool failOnNoFoun
             result.append(tmp);
 
             QString tmpTrim(tmp);
-            int pos = tmpTrim.indexOf(port.getDetectedLineFeed());
+            int pos = tmpTrim.indexOf(port->getDetectedLineFeed());
             if (pos != -1)
-                tmpTrim.remove(pos, port.getDetectedLineFeed().size());
+                tmpTrim.remove(pos, port->getDetectedLineFeed().size());
             diag(qPrintable(tr("GOT:%s\n")), tmpTrim.toLocal8Bit().constData());
 
             if (tmpTrim.length() > 0)
@@ -796,7 +815,7 @@ bool GCode::waitForStartupBanner(QString& result, int waitSec, bool failOnNoFoun
             {
                 // waited too long for a response, fail
 
-                QString msg(tr("No data from COM port after connect. Expecting Grbl version string."));
+                QString msg(tr("No data from port after connect. Expecting Grbl version string."));
                 emit addList(msg);
                 emit sendMsg(msg);
 
@@ -830,7 +849,7 @@ bool GCode::waitForStartupBanner(QString& result, int waitSec, bool failOnNoFoun
         //status = false;
     }
 
-    QStringList list = QString(result).split(port.getDetectedLineFeed());
+    QStringList list = QString(result).split(port->getDetectedLineFeed());
     QStringList listToSend;
     for (int i = 0; i < list.size(); i++)
     {
@@ -987,14 +1006,14 @@ void GCode::sendStatusList(QStringList& listToSend)
 #pragma GCC diagnostic ignored "-Wunused-parameter" push
 void GCode::timerEvent(QTimerEvent *event)
 {
-    if (port.isPortOpen())
+    if (port != NULL && port->isPortOpen())
     {
         char tmp[BUF_SIZE + 1] = {0};
         QString result;
 
         for (int i = 0; i < 10 && !shutdownState.get() && !resetState.get(); i++)
         {
-            int n = port.PollComport(tmp, BUF_SIZE);
+            int n = port->PollComport(tmp, BUF_SIZE);
             if (n == 0)
                 break;
 
@@ -1008,7 +1027,7 @@ void GCode::timerEvent(QTimerEvent *event)
             return;
         }
 
-        QStringList list = QString(result).split(port.getDetectedLineFeed());
+        QStringList list = QString(result).split(port->getDetectedLineFeed());
         QStringList listToSend;
         for (int i = 0; i < list.size(); i++)
         {
@@ -1817,7 +1836,7 @@ void GCode::setResponseWait(ControlParams controlParamsIn)
 
     controlParams.useMm = oldMm;
 
-    port.setCharSendDelayMs(controlParams.charSendDelayMs);
+    if (port != NULL) port->setCharSendDelayMs(controlParams.charSendDelayMs);
 
     if ((oldMm != controlParamsIn.useMm) && isPortOpen() && doubleDollarFormat)
     {

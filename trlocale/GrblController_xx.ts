@@ -23,7 +23,7 @@
     <name>GCode</name>
     <message>
         <location filename="../gcode.cpp" line="42"/>
-        <source>Can&apos;t open COM port </source>
+        <source>Can&apos;t open port </source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -95,7 +95,7 @@
     <message>
         <location filename="../gcode.cpp" line="523"/>
         <location filename="../gcode.cpp" line="737"/>
-        <source>Error reading data from COM port
+        <source>Error reading data from port
 </source>
         <translation type="unfinished"></translation>
     </message>
@@ -141,7 +141,7 @@
     </message>
     <message>
         <location filename="../gcode.cpp" line="780"/>
-        <source>No data from COM port after connect. Expecting Grbl version string.</source>
+        <source>No data from port after connect. Expecting Grbl version string.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

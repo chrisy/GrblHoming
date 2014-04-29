@@ -7,12 +7,19 @@
  * Software is provided AS-IS
  ****************************************************************/
 
-#include "rs232.h"
 #include <QObject>
+#include "rs232.h"
+#include "sleep.h"
 
 RS232::RS232()
     : port(NULL), detectedEOL(0), charSendDelayMs(DEFAULT_CHAR_SEND_DELAY_MS)
 {
+    return;
+}
+
+RS232::~RS232()
+{
+    this->CloseComport();
 }
 
 bool RS232::OpenComport(QString commPortStr, QString baudRate)
@@ -52,7 +59,6 @@ bool RS232::OpenComport(QString commPortStr, QString baudRate)
 
     return port->isOpen();
 }
-
 
 int RS232::PollComport(char *buf, int size)
 {

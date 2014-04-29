@@ -27,8 +27,8 @@
     <name>GCode</name>
     <message>
         <location filename="../gcode.cpp" line="42"/>
-        <source>Can&apos;t open COM port </source>
-        <translation>Impossible d&apos;ouvrir le port série  </translation>
+        <source>Can&apos;t open port </source>
+        <translation>Impossible d&apos;ouvrir le port</translation>
     </message>
     <message>
         <location filename="../gcode.cpp" line="47"/>
@@ -99,9 +99,9 @@
     <message>
         <location filename="../gcode.cpp" line="523"/>
         <location filename="../gcode.cpp" line="737"/>
-        <source>Error reading data from COM port
+        <source>Error reading data from port
 </source>
-        <translation>Erreur de lecture des données dur le port série</translation>
+        <translation>Erreur de lecture des données dur le port</translation>
     </message>
     <message>
         <location filename="../gcode.cpp" line="545"/>
@@ -145,8 +145,8 @@
     </message>
     <message>
         <location filename="../gcode.cpp" line="780"/>
-        <source>No data from COM port after connect. Expecting Grbl version string.</source>
-        <translation>Aucune données depuis le port série après la connexion, en attente de la version Grbl</translation>
+        <source>No data from port after connect. Expecting Grbl version string.</source>
+        <translation>Aucune données depuis le port après la connexion, en attente de la version Grbl</translation>
     </message>
     <message>
         <location filename="../gcode.cpp" line="801"/>
