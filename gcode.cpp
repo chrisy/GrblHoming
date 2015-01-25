@@ -200,10 +200,6 @@ void GCode::pollPosWaitForIdle(bool checkMeasurementUnits)
 {
     diag ("pollPosWaitForIdle checkMeasurementUnits=%d", checkMeasurementUnits);
 
-    bool ret = sendGcodeLocal(REQUEST_PARSER_STATE_V08c);
-    if (!ret)
-        return;
-
     if (controlParams.usePositionRequest
             && (controlParams.positionRequestType == PREQ_ALWAYS_NO_IDLE_CHK
                     || controlParams.positionRequestType == PREQ_ALWAYS
@@ -411,7 +407,7 @@ bool GCode::sendGcodeInternal(QString line, QString& result, bool recordResponse
     if (ctrlX)
         diag(qPrintable(tr("SENDING[%d]: 0x%02X (CTRL-X)\n")), currLine, buf[0]);
     else
-        diag(qPrintable(tr("SENDING[%d]: %s\n")), currLine, buf);
+        diag(qPrintable(tr("SENDING[%d]: '%s'\n")), currLine, buf);
 
     int waitSecActual = waitSec == -1 ? controlParams.waitTime : waitSec;
 
@@ -774,8 +770,6 @@ bool GCode::waitForStartupBanner(QString& result, int waitSec, bool failOnNoFoun
             }
         }
 
-        SLEEP(100);
-
         if (count > waitCount)
         {
             if (failOnNoFound)
@@ -917,6 +911,11 @@ void GCode::parseGcodeState(const QString &str, bool defaults)
     if (matched)
     {
         emit updateGrblState(grblState);
+        diag("Grbl State: mm:%d in:%d abs:%d spin:%d dir:%d cool:%d t:%d f:%d",
+             grblState.mm, grblState.in,
+             grblState.absolute,
+             grblState.spindle, grblState.direction,
+             grblState.coolant, grblState.toolNumber, grblState.feedRate);
     }
 }
 
@@ -943,10 +942,7 @@ void GCode::parseCoordinates(const QString& received, bool aggressive)
     if (aggressive)
     {
         int ms = parseCoordTimer.elapsed();
-        if (ms < 500)
-            return;
-
-        parseCoordTimer.restart();
+        if (ms >= 500) parseCoordTimer.restart();
     }
 
 	bool good = false;
@@ -1388,7 +1384,8 @@ QString GCode::removeUnsupportedCommands(QString line)
         else if (s.at(0) == 'X' || s.at(0) == 'Y' || s.at(0) == 'Z'
                  || s.at(0) == 'A' || s.at(0) == 'B' || s.at(0) == 'C'
                  || s.at(0) == 'I' || s.at(0) == 'J' || s.at(0) == 'K'
-                 || s.at(0) == 'F' || s.at(0) == 'L' || s.at(0) == 'S')
+                 || s.at(0) == 'F' || s.at(0) == 'L' || s.at(0) == 'S'
+                 || s.at(0) == 'T')
         {
             tmp.append(s).append(" ");
         }
@@ -1406,13 +1403,14 @@ QString GCode::removeUnsupportedCommands(QString line)
 
 QString GCode::reducePrecision(QString line)
 {
-    // first remove all spaces to determine what are line length is
+    // We only need to reduce any precision if the line is longer than
+    // the grbl buffer
+    if (line.length() < (controlParams.grblLineBufferLen - 1))
+        return line;
+
+    // Spaces are optional in Gcode, so remove them first
     QStringList components = line.split(" ", QString::SkipEmptyParts);
-    QString result;
-    foreach(QString token, components)
-    {
-        result.append(token);
-    }
+    QString result = components.join("");
 
     if (result.length() == 0)
         return line;// nothing to do
@@ -1424,8 +1422,13 @@ QString GCode::reducePrecision(QString line)
     int pos = result.indexOf('(');
     if (pos >= 0)
         result = result.left(pos);
+    // comments also begin with ;
+    pos = result.indexOf(';');
+    if (pos >= 0)
+        result = result.left(pos);
 
-    int charsToRemove = result.length() - (controlParams.grblLineBufferLen - 1);// subtract 1 to account for linefeed sent with command later
+    // subtract 1 to account for linefeed sent with command later
+    int charsToRemove = result.length() - (controlParams.grblLineBufferLen - 1);
 
     if (charsToRemove > 0)
     {
